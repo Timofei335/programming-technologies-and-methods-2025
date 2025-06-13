@@ -1,0 +1,47 @@
+<!-- templates/admin/users.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Список пользователей</h1>
+<table class="table">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Имя пользователя</th>
+            <th>Email</th>
+            <th>Статус</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ user.email }}</td>
+            <td>
+                {% if user.is_admin %}
+                    <span class="badge bg-success">Администратор</span>
+                {% else %}
+                    <span class="badge bg-secondary">Пользователь</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if user.id != current_user.id %}
+                <form method="POST" action="{{ url_for('toggle_admin', user_id=user.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm {% if user.is_admin %}btn-warning{% else %}btn-success{% endif %}">
+                        {% if user.is_admin %}
+                            Отозвать права
+                        {% else %}
+                            Назначить админом
+                        {% endif %}
+                    </button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Загрузка файла{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h4>Загрузить файл</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload_file') }}">
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.file.label(class="form-label", text="Файл") }}
+                        {{ form.file(class="form-control") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.description.label(class="form-label", text="Описание") }}
+                        {{ form.description(class="form-control", rows=3) }}
+                    </div>
+                    <button type="submit" class="btn btn-primary">Загрузить</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

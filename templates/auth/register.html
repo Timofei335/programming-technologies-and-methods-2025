@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Регистрация</h2>
+    <form method="POST" action="{{ url_for('register') }}">
+        {{ form.hidden_tag() }}
+        <div class="form-group">
+            {{ form.username.label(text="Имя пользователя") }}
+            {{ form.username(class="form-control") }}
+            {% for error in form.username.errors %}
+                <small class="text-danger">{{ error }}</small>
+            {% endfor %}
+        </div>
+        <div class="form-group">
+            {{ form.email.label(text="Email") }}
+            {{ form.email(class="form-control") }}
+            {% for error in form.email.errors %}
+                <small class="text-danger">{{ error }}</small>
+            {% endfor %}
+        </div>
+        <div class="form-group">
+            {{ form.password.label(text="Пароль") }}
+            {{ form.password(class="form-control") }}
+            {% for error in form.password.errors %}
+                <small class="text-danger">{{ error }}</small>
+            {% endfor %}
+        </div>
+        <button type="submit" class="btn btn-primary">Зарегистрироваться</button>
+    </form>
+</div>
+{% endblock %}
