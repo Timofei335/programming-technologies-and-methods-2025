@@ -3,7 +3,6 @@ import os  # Для работы с файловой системой
 import uuid  # Для генерации уникальных идентификаторов
 from datetime import datetime, timedelta  # Для работы с датой и временем
 from email.policy import default
-
 from flask import Flask, render_template, redirect, url_for, flash, abort, request, send_from_directory  # Основные компоненты Flask
 from flask_sqlalchemy import SQLAlchemy  # ORM для работы с базой данных
 from sqlalchemy.exc import IntegrityError  # Ошибка целостности БД
@@ -220,7 +219,7 @@ def login():
         return redirect(url_for('index'))
 
     form = LoginForm()
-    if form.validate_on_submit():  # Если форма отправлена и валидна
+    if request.method == "POST" and form.validate_on_submit():  # Если форма отправлена и валидна
         user = User.query.filter_by(username=form.username.data).first()  # Поиск пользователя
         if user and user.check_password(form.password.data):  # Проверка пароля
             login_user(user, remember=form.remember_me.data)  # Вход пользователя
@@ -242,7 +241,7 @@ def logout():
 @login_required  # Только для авторизованных
 def profile():
     form = ProfileForm()
-    if form.validate_on_submit():  # Если форма отправлена и валидна
+    if request.method == "POST" and form.validate_on_submit():  # Если форма отправлена и валидна
         current_user.full_name = form.full_name.data  # Обновление имени
 
         if form.avatar.data:  # Если загружен новый аватар
@@ -280,7 +279,7 @@ def user_files():
 @login_required
 def upload_file():
     form = UploadFileForm()
-    if form.validate_on_submit():  # Если форма отправлена и валидна
+    if request.method == "POST" and form.validate_on_submit():  # Если форма отправлена и валидна
         file = form.file.data
         if not (file and allowed_file(file.filename)):  # Проверка расширения файла
             flash('Your file not allowed!')
@@ -316,7 +315,7 @@ def file_details(file_id):
         abort(403)
 
     form = EditFileForm()
-    if form.validate_on_submit():  # Если форма отправлена и валидна
+    if request.method == "POST" and form.validate_on_submit():  # Если форма отправлена и валидна
         file.description = form.description.data  # Обновление описания
         db.session.commit()  # Сохранение в БД
         flash('File description updated.')
