@@ -24,6 +24,8 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # Максимальный 
 app.config['ALLOWED_EXTENSIONS'] = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'zip', 'doc', 'docx'}  # Разрешенные расширения файлов
 app.config['LINK_EXPIRE_HOURS'] = 12  # Время жизни ссылки в часах
 csrf = CSRFProtect(app)  # Инициализация CSRF-защиты
+MAX_FILENAME_LENGTH = 20  # Максимальная длина имени файла (без учета расширения)
+MAX_TOTAL_FILENAME_LENGTH = 70  # Максимальная общая длина имени файла (с UUID и расширением)
 
 # Инициализация расширений
 db = SQLAlchemy(app)  # Подключение SQLAlchemy
@@ -37,6 +39,39 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 def allowed_file(filename):
     return '.' in filename and \
         filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+
+# Функция для обрезания имени файла с сохранением расширения
+def process_filename(filename):
+    # Сначала применяем secure_filename для безопасного имени
+    safe_name = secure_filename(filename)
+
+    # Разделяем имя и расширение
+    name_part, ext = os.path.splitext(safe_name)
+
+    # Обрезаем основную часть имени, если оно слишком длинное
+    if len(name_part) > MAX_FILENAME_LENGTH:
+        name_part = name_part[:MAX_FILENAME_LENGTH]
+
+    # Генерируем уникальный префикс
+    unique_prefix = uuid.uuid4().hex
+
+    # Собираем полное имя
+    full_name = f"{unique_prefix}_{name_part}{ext}"
+
+    # Проверяем общую длину и обрезаем при необходимости
+    if len(full_name) > MAX_TOTAL_FILENAME_LENGTH:
+        # Вычисляем доступное место для имени (учитывая UUID, подчеркивание и расширение)
+        available_space = MAX_TOTAL_FILENAME_LENGTH - len(unique_prefix) - 1 - len(ext)
+        if available_space > 0:
+            name_part = name_part[:available_space]
+            full_name = f"{unique_prefix}_{name_part}{ext}"
+        else:
+            # Если совсем нет места, используем только UUID + расширение
+            full_name = f"{unique_prefix}{ext}"
+
+    return full_name
+
 
 # Форма регистрации пользователя
 class RegistrationForm(FlaskForm):
@@ -279,33 +314,62 @@ def user_files():
 @login_required
 def upload_file():
     form = UploadFileForm()
-    if request.method == "POST" and form.validate_on_submit():  # Если форма отправлена и валидна
+    if request.method == "POST" and form.validate_on_submit():
         file = form.file.data
-        if not (file and allowed_file(file.filename)):  # Проверка расширения файла
-            flash('Your file not allowed!')
-            return render_template('files/upload.html', form=form)  # Рендеринг формы загрузки
 
-        filename = secure_filename(file.filename)  # Безопасное имя файла
-        unique_filename = f"{uuid.uuid4().hex}_{filename}"  # Генерация уникального имени
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)  # Путь сохранения
-        file.save(file_path)  # Сохранение файла
+        # Проверка наличия файла и разрешенного расширения
+        if not file or file.filename == '':
+            flash('No selected file')
+            return redirect(request.url)
 
-        # Создание записи о файле в БД
-        new_file = File(
-            original_name=filename,
-            storage_name=unique_filename,
-            description=form.description.data,
-            size=os.path.getsize(file_path),  # Получение размера файла
-            owner=current_user
-        )
-        db.session.add(new_file)  # Добавление в сессию
-        db.session.commit()  # Сохранение в БД
+        if not allowed_file(file.filename):
+            flash('File type not allowed! Allowed extensions: ' + ', '.join(app.config['ALLOWED_EXTENSIONS']))
+            return redirect(request.url)
 
-        flash('File uploaded successfully!')
-        return redirect(url_for('user_files'))
+        try:
+            # Обработка имени файла
+            original_name = secure_filename(file.filename)
+            storage_name = process_filename(file.filename)
 
-    return render_template('files/upload.html', form=form)  # Рендеринг формы загрузки
+            # Проверка на дубликаты (хотя маловероятно с UUID)
+            if os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], storage_name)):
+                storage_name = f"{uuid.uuid4().hex}_{storage_name}"
 
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], storage_name)
+            file.save(file_path)
+
+            # Проверка что файл действительно сохранился
+            if not os.path.exists(file_path):
+                raise IOError("File was not saved correctly")
+
+            # Создание записи в БД
+            new_file = File(
+                original_name=original_name,  # Оригинальное имя для отображения
+                storage_name=storage_name,  # Обработанное имя для хранения
+                description=form.description.data,
+                size=os.path.getsize(file_path),
+                user_id=current_user.id
+            )
+
+            db.session.add(new_file)
+            db.session.commit()
+
+            flash('File uploaded successfully!')
+            return redirect(url_for('user_files'))
+
+        except Exception as e:
+            # Откат в случае ошибки
+            db.session.rollback()
+
+            # Удаление файла если он был сохранен, но запись в БД не прошла
+            if 'file_path' in locals() and os.path.exists(file_path):
+                os.remove(file_path)
+
+            app.logger.error(f'File upload error: {str(e)}')
+            flash('An error occurred during file upload. Please try again.')
+            return redirect(request.url)
+
+    return render_template('files/upload.html', form=form)
 # Маршрут деталей файла
 @app.route('/files/<int:file_id>', methods=['GET', 'POST'])
 @login_required

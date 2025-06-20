@@ -9,40 +9,66 @@
 </div>
 
 {% if files %}
-<table class="table">
-    <thead>
-        <tr>
-            <th>Имя файла</th>
-            <th>Размер</th>
-            <th>Дата загрузки</th>
-            <th>Действия</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for file in files %}
-        <tr>
-            <td>
-                <a href="{{ url_for('file_details', file_id=file.id) }}">{{ file.original_name }}</a>
-                {% if file.description %}
-                <p class="text-muted">{{ file.description|truncate(50) }}</p>
-                {% endif %}
-            </td>
-            <td>{{ file.get_size_mb() }} MB</td>
-            <td>{{ file.upload_date.strftime('%Y-%m-%d %H:%M') }}</td>
-            <td>
-                <a href="{{ url_for('download_file', file_id=file.id) }}" class="btn btn-sm btn-success">Скачать</a>
-                <form method="POST" action="{{ url_for('delete_file', file_id=file.id) }}" class="d-inline">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Вы уверены?')">Удалить</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+<div class="table-responsive">
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 40%">Имя файла</th>
+                <th style="width: 15%">Размер</th>
+                <th style="width: 20%">Дата загрузки</th>
+                <th style="width: 25%">Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for file in files %}
+            <tr>
+                <td class="text-truncate" style="max-width: 300px;">
+                    <a href="{{ url_for('file_details', file_id=file.id) }}"
+                       title="{{ file.original_name }}"
+                       class="d-inline-block text-truncate" style="max-width: 100%;">
+                        {{ file.original_name|truncate(30, True) }}
+                    </a>
+                    {% if file.description %}
+                    <p class="text-muted small mb-0">{{ file.description|truncate(50) }}</p>
+                    {% endif %}
+                </td>
+                <td>{{ file.get_size_mb() }} MB</td>
+                <td>{{ file.upload_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                    <div class="d-flex gap-2">
+                        <a href="{{ url_for('download_file', file_id=file.id) }}"
+                           class="btn btn-sm btn-success">Скачать</a>
+                        <form method="POST"
+                              action="{{ url_for('delete_file', file_id=file.id) }}"
+                              class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit"
+                                    class="btn btn-sm btn-danger"
+                                    onclick="return confirm('Вы уверены?')">
+                                Удалить
+                            </button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% else %}
 <div class="alert alert-info">
     У вас пока нет загруженных файлов. <a href="{{ url_for('upload_file') }}">Загрузите первый файл</a>.
 </div>
 {% endif %}
+
+<style>
+    .text-truncate {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .table-responsive {
+        overflow-x: auto;
+    }
+</style>
 {% endblock %}
