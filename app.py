@@ -26,6 +26,8 @@ app.config['LINK_EXPIRE_HOURS'] = 12  # Время жизни ссылки в ч
 csrf = CSRFProtect(app)  # Инициализация CSRF-защиты
 MAX_FILENAME_LENGTH = 20  # Максимальная длина имени файла (без учета расширения)
 MAX_TOTAL_FILENAME_LENGTH = 70  # Максимальная общая длина имени файла (с UUID и расширением)
+app.config['UPLOAD_SUBFOLDER_LEVELS'] = 2  # Количество уровней вложенности папок
+app.config['UPLOAD_SUBFOLDER_LENGTH'] = 2  # Длина подпапки на каждом уровне
 
 # Инициализация расширений
 db = SQLAlchemy(app)  # Подключение SQLAlchemy
@@ -43,34 +45,43 @@ def allowed_file(filename):
 
 # Функция для обрезания имени файла с сохранением расширения
 def process_filename(filename):
-    # Сначала применяем secure_filename для безопасного имени
-    safe_name = secure_filename(filename)
+    # Генерируем уникальный ID для файла
+    file_uuid = uuid.uuid4().hex
+    # Создаем структуру подпапок на основе UUID
+    subfolders = []
+    for i in range(app.config['UPLOAD_SUBFOLDER_LEVELS']):
+        start = i * app.config['UPLOAD_SUBFOLDER_LENGTH']
+        end = start + app.config['UPLOAD_SUBFOLDER_LENGTH']
+        subfolders.append(file_uuid[start:end])
+    subfolder_path = os.path.join(*subfolders)
 
-    # Разделяем имя и расширение
+    # Создаем полный путь к папке
+    full_folder_path = os.path.join(app.config['UPLOAD_FOLDER'], subfolder_path)
+    os.makedirs(full_folder_path, exist_ok=True)
+
+    # Обрабатываем оригинальное имя файла
+    safe_name = secure_filename(filename)
     name_part, ext = os.path.splitext(safe_name)
 
-    # Обрезаем основную часть имени, если оно слишком длинное
+    # Обрезаем имя файла если нужно
     if len(name_part) > MAX_FILENAME_LENGTH:
         name_part = name_part[:MAX_FILENAME_LENGTH]
 
-    # Генерируем уникальный префикс
-    unique_prefix = uuid.uuid4().hex
+    # Формируем конечное имя файла
+    final_name = f"{file_uuid}_{name_part}{ext}"
 
-    # Собираем полное имя
-    full_name = f"{unique_prefix}_{name_part}{ext}"
-
-    # Проверяем общую длину и обрезаем при необходимости
-    if len(full_name) > MAX_TOTAL_FILENAME_LENGTH:
-        # Вычисляем доступное место для имени (учитывая UUID, подчеркивание и расширение)
-        available_space = MAX_TOTAL_FILENAME_LENGTH - len(unique_prefix) - 1 - len(ext)
+    # Проверяем общую длину
+    if len(final_name) > MAX_TOTAL_FILENAME_LENGTH:
+        available_space = MAX_TOTAL_FILENAME_LENGTH - len(file_uuid) - 1 - len(ext)
         if available_space > 0:
             name_part = name_part[:available_space]
-            full_name = f"{unique_prefix}_{name_part}{ext}"
+            final_name = f"{file_uuid}_{name_part}{ext}"
         else:
-            # Если совсем нет места, используем только UUID + расширение
-            full_name = f"{unique_prefix}{ext}"
+            final_name = f"{file_uuid}{ext}"
 
-    return full_name
+    # Возвращаем относительный путь к файлу и имя для хранения
+    storage_name = os.path.join(subfolder_path, final_name)
+    return storage_name
 
 
 # Форма регистрации пользователя
@@ -330,16 +341,17 @@ def upload_file():
             # Обработка имени файла
             original_name = secure_filename(file.filename)
             storage_name = process_filename(file.filename)
+            full_path = os.path.join(app.config['UPLOAD_FOLDER'], storage_name)
 
             # Проверка на дубликаты (хотя маловероятно с UUID)
             if os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], storage_name)):
                 storage_name = f"{uuid.uuid4().hex}_{storage_name}"
+                full_path = os.path.join(app.config['UPLOAD_FOLDER'], storage_name)
 
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], storage_name)
-            file.save(file_path)
+            file.save(full_path)
 
             # Проверка что файл действительно сохранился
-            if not os.path.exists(file_path):
+            if not os.path.exists(full_path):
                 raise IOError("File was not saved correctly")
 
             # Создание записи в БД
@@ -347,7 +359,7 @@ def upload_file():
                 original_name=original_name,  # Оригинальное имя для отображения
                 storage_name=storage_name,  # Обработанное имя для хранения
                 description=form.description.data,
-                size=os.path.getsize(file_path),
+                size=os.path.getsize(full_path),
                 user_id=current_user.id
             )
 
@@ -362,8 +374,8 @@ def upload_file():
             db.session.rollback()
 
             # Удаление файла если он был сохранен, но запись в БД не прошла
-            if 'file_path' in locals() and os.path.exists(file_path):
-                os.remove(file_path)
+            if 'file_path' in locals() and os.path.exists(full_path):
+                os.remove(full_path)
 
             app.logger.error(f'File upload error: {str(e)}')
             flash('An error occurred during file upload. Please try again.')
@@ -401,13 +413,16 @@ def file_details(file_id):
 @app.route('/files/<int:file_id>/download')
 @login_required
 def download_file(file_id):
-    file = File.query.get_or_404(file_id)  # Получение файла или 404
-    if file.owner != current_user and not current_user.is_admin:  # Проверка прав доступа
+    file = File.query.get_or_404(file_id)
+    if file.owner != current_user and not current_user.is_admin:
         abort(403)
 
+    file_dir = os.path.dirname(os.path.join(app.config['UPLOAD_FOLDER'], file.storage_name))
+    file_name = os.path.basename(file.storage_name)
+
     # Отправка файла пользователю
-    return send_from_directory(app.config['UPLOAD_FOLDER'],
-                               file.storage_name,
+    return send_from_directory(file_dir,
+                               file_name,
                                as_attachment=True,
                                download_name=file.original_name)
 
@@ -423,6 +438,17 @@ def delete_file(file_id):
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.storage_name)
     if os.path.exists(file_path):
         os.remove(file_path)
+
+        try:
+            dir_path = os.path.dirname(file_path)
+            if os.path.exists(dir_path):
+                if not os.listdir(dir_path):
+                    os.rmdir(dir_path)
+                    parent_dir = os.path.dirname(dir_path)
+                    if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                       os.rmdir(parent_dir)
+        except OSError:
+            pass
 
     # Удаление записи о файле из БД
     db.session.delete(file)
@@ -464,10 +490,13 @@ def download_via_link(token):
     link.download_count += 1  # Увеличение счетчика скачиваний
     db.session.commit()
 
+    file_dir = os.path.dirname(os.path.join(app.config['UPLOAD_FOLDER'], link.file.storage_name))
+    file_name = os.path.basename(link.file.storage_name)
+
     # Отправка файла
     return send_from_directory(
-        app.config['UPLOAD_FOLDER'],
-        link.file.storage_name,
+        file_dir,
+        file_name,
         as_attachment=True,
         download_name=link.file.original_name
     )
